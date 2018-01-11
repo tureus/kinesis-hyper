@@ -1,0 +1,14 @@
+[package]
+name = "kinesis-hyper-bug"
+version = "0.1.0"
+authors = ["Xavier Lange <xrlange@gmail.com>"]
+
+[dependencies]
+serde = "*"
+serde_derive = "*"
+serde_json = "*"
+log = "*"
+env_logger = "*"
+pretty-bytes = "*"
+rusoto_core = { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
+rusoto_kinesis = { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
