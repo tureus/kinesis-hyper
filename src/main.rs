@@ -97,6 +97,7 @@ fn main() {
             let client = client.clone();
             let stream_name = stream_name.clone();
             std::thread::spawn(move || {
+                let client = Arc::new(KinesisClient::simple(Region::UsWest2));
                 let start = Instant::now();
                 let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
                 match res {
