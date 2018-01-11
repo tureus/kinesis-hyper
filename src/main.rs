@@ -13,6 +13,7 @@ extern crate log;
 
 use std::{io,env};
 use std::sync::Arc;
+use std::time::{Instant};
 
 use rusoto_core::Region;
 use rusoto_core::reactor::{CredentialsProvider, RequestDispatcher};
@@ -86,8 +87,8 @@ fn main() {
     let stream_name = get_kinesis_stream_name(&client).unwrap();
 
     info!(
-        "spawning kinesis sender num_threads={} num_puts={} stream_name={}",
-        num_threads, num_puts, stream_name
+        "spawning kinesis sender num_threads={} num_puts={} puts_size={} stream_name={}",
+        num_threads, num_puts, puts_size, stream_name
     );
 
     let hs: Vec<std::thread::JoinHandle<()>> = (0..num_threads)
@@ -95,9 +96,12 @@ fn main() {
             let client = client.clone();
             let stream_name = stream_name.clone();
             std::thread::spawn(move || {
+                let start = Instant::now();
                 let res = send_to_kinesis(client, stream_name, num_puts, puts_size);
                 match res {
-                    Ok(_) => {debug!("successfully sent to kinesis")},
+                    Ok(_) => {
+                        info!("successfully sent to kinesis ({} seconds)", start.elapsed().as_secs());
+                    },
                     Err(e) => {
                         error!("failed to send to kinesis: {:?}", e);
                     }
@@ -110,7 +114,7 @@ fn main() {
     }
 }
 
-fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<(),io::Error> {
+fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<(),rusoto_kinesis::PutRecordsError> {
     let serialize_data = serde_json::to_vec(&FauxLog{ msg: TEST_BUF })?;
     let logs : Vec<PutRecordsRequestEntry> = (0..puts_size).map(|n|{
         PutRecordsRequestEntry {
@@ -124,7 +128,7 @@ fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: 
         client.put_records(&PutRecordsInput{
             records: logs.clone(),
             stream_name: stream_name.clone(),
-        });
+        }).sync()?;
     };
 
     Ok(())
