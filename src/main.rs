@@ -14,6 +14,7 @@ extern crate log;
 use std::{io,env};
 use std::sync::Arc;
 use std::time::{Instant};
+use std::error::Error;
 
 use rusoto_core::Region;
 use rusoto_core::reactor::{CredentialsProvider, RequestDispatcher};
@@ -79,7 +80,7 @@ fn main() {
     let puts_size: usize = if let Some(n) = arg_iter.next() {
         n.parse().unwrap()
     } else {
-        1000
+        500
     };
 
     let client = Arc::new(KinesisClient::simple(Region::UsWest2));
@@ -97,13 +98,13 @@ fn main() {
             let stream_name = stream_name.clone();
             std::thread::spawn(move || {
                 let start = Instant::now();
-                let res = send_to_kinesis(client, stream_name, num_puts, puts_size);
+                let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
                 match res {
-                    Ok(_) => {
-                        info!("successfully sent to kinesis ({} seconds)", start.elapsed().as_secs());
+                    Ok(bytes) => {
+                        info!("successfully sent to kinesis ({} bytes, {} seconds)", bytes, start.elapsed().as_secs());
                     },
                     Err(e) => {
-                        error!("failed to send to kinesis: {:?}", e);
+                        error!("failed to send to kinesis: {:?}", e.description());
                     }
                 };
             })
@@ -114,7 +115,7 @@ fn main() {
     }
 }
 
-fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<(),rusoto_kinesis::PutRecordsError> {
+fn send_to_kinesis_sync(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<usize,rusoto_kinesis::PutRecordsError> {
     let serialize_data = serde_json::to_vec(&FauxLog{ msg: TEST_BUF })?;
     let logs : Vec<PutRecordsRequestEntry> = (0..puts_size).map(|n|{
         PutRecordsRequestEntry {
@@ -124,6 +125,8 @@ fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: 
         }
     }).collect();
 
+    let approx_size = serialize_data.len() * num_puts;
+
     for _ in 0..num_puts {
         client.put_records(&PutRecordsInput{
             records: logs.clone(),
@@ -131,5 +134,5 @@ fn send_to_kinesis(client: DefaultKinesisClient, stream_name: String, num_puts: 
         }).sync()?;
     };
 
-    Ok(())
+    Ok(approx_size)
 }
