@@ -64,16 +64,16 @@ fn main() {
     let mut arg_iter = args.iter();
     let _ = arg_iter.next();
 
-    let num_puts: usize = if let Some(n) = arg_iter.next() {
-        n.parse().unwrap()
-    } else {
-        1000
-    };
-
     let num_threads: usize = if let Some(n) = arg_iter.next() {
         n.parse().unwrap()
     } else {
         1
+    };
+
+    let num_puts: usize = if let Some(n) = arg_iter.next() {
+        n.parse().unwrap()
+    } else {
+        1000
     };
 
     let puts_size: usize = if let Some(n) = arg_iter.next() {
@@ -87,7 +87,7 @@ fn main() {
     let stream_name = get_kinesis_stream_name(&client).unwrap();
 
     info!(
-        "spawning kinesis sender num_threads={} num_puts={} puts_size={} stream_name={}",
+        "testing kinesis put_records num_threads={} num_puts={} puts_size={} stream_name={}",
         num_threads, num_puts, puts_size, stream_name
     );
 
