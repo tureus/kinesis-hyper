@@ -7,6 +7,8 @@ extern crate serde_json;
 extern crate rusoto_core;
 extern crate rusoto_kinesis;
 
+extern crate futures;
+
 extern crate env_logger;
 #[macro_use]
 extern crate log;
@@ -97,23 +99,111 @@ fn main() {
             let client = client.clone();
             let stream_name = stream_name.clone();
             std::thread::spawn(move || {
-                let client = Arc::new(KinesisClient::simple(Region::UsWest2));
-                let start = Instant::now();
-                let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
-                match res {
-                    Ok(bytes) => {
-                        info!("successfully sent to kinesis ({} bytes, {} seconds)", bytes, start.elapsed().as_secs());
-                    },
-                    Err(e) => {
-                        error!("failed to send to kinesis: {:?}", e.description());
-                    }
-                };
+//                do_thread_sync(client, stream_name, num_puts, puts_size)
+                kinesis_pipeline(client, stream_name, num_puts, puts_size)
             })
         })
         .collect();
     for h in hs {
         h.join().unwrap();
     }
+}
+
+struct FauxData {
+    serialize_data: Vec<u8>,
+    n: usize
+}
+
+impl FauxData {
+    fn new() -> Self {
+        FauxData {
+            serialize_data: serde_json::to_vec(&FauxLog{ msg: TEST_BUF }).unwrap(),
+            n: 0
+        }
+
+    }
+}
+impl Iterator for FauxData {
+    type Item = PutRecordsRequestEntry;
+    fn next(&mut self) -> Option<PutRecordsRequestEntry> {
+        self.n += 1;
+        Some(PutRecordsRequestEntry{
+            data: self.serialize_data.clone(),
+            explicit_hash_key: None,
+            partition_key: format!("{}", self.n)
+        })
+    }
+}
+
+fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
+    use futures::sync::mpsc::{ channel, spawn };
+    use futures::{ Sink, Future, Stream };
+    use futures::stream::Sender;
+    use rusoto_core::reactor::DEFAULT_REACTOR;
+
+    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+    let data = FauxData::new();
+
+    let (mut tx, mut rx) = channel(1);
+
+    for rec in data {
+        tx.send(rec);
+    }
+}
+
+//fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
+//    use futures::sync::mpsc::{ channel, spawn };
+//    use futures::{ Sink, Future, Stream };
+//    use futures::stream::Sender;
+//    use rusoto_core::reactor::DEFAULT_REACTOR;
+//
+//    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+//    let data = FauxData::new();
+//
+//    let (mut tx, mut rx) = channel(1);
+//    let doer = spawn(rx, &DEFAULT_REACTOR.remote, 2);
+//
+//    // Spawn thread to pull out chunks
+//    std::thread::spawn(|| {
+//        DEFAULT_REACTOR.remote.spawn(|_|{
+//            let res = doer.chunks(500).poll();
+//            info!("chunk poll: {:?}", res);
+//            Ok(())
+//        })
+//    });
+//
+//    let mut i = 0;
+//    for datum in data {
+//        let rec : Result<PutRecordsInput,io::Error>= Ok(PutRecordsInput {
+//            records: vec![datum],
+//            stream_name: stream_name.clone(),
+//        });
+//        let tx = tx.clone();
+//        DEFAULT_REACTOR.remote.spawn(|_|{
+//            let mut send  = tx.send(rec);
+//            match send.poll() {
+//                Ok(aa) => {info!("yay {:?}", aa)},
+//                Err(_) => { () },
+//            };
+//            Ok(())
+//        });
+//
+//        i+=1;
+//    }
+//}
+
+fn do_thread_sync(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
+    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+    let start = Instant::now();
+    let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
+    match res {
+        Ok(bytes) => {
+            info!("successfully sent to kinesis ({} bytes, {} seconds)", bytes, start.elapsed().as_secs());
+        },
+        Err(e) => {
+            error!("failed to send to kinesis: {:?}", e.description());
+        }
+    };
 }
 
 fn send_to_kinesis_sync(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<usize,rusoto_kinesis::PutRecordsError> {
