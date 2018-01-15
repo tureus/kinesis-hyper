@@ -8,23 +8,25 @@ extern crate rusoto_core;
 extern crate rusoto_kinesis;
 
 extern crate futures;
+extern crate spmc;
 
 extern crate env_logger;
 #[macro_use]
 extern crate log;
 
-use std::{io,env};
+use std::{env, io};
 use std::sync::Arc;
-use std::time::{Instant};
+use std::time::Instant;
 use std::error::Error;
 
 use rusoto_core::Region;
 use rusoto_core::reactor::{CredentialsProvider, RequestDispatcher};
-use rusoto_kinesis::{Kinesis, KinesisClient, ListStreamsInput, PutRecordsRequestEntry, PutRecordsInput};
+use rusoto_kinesis::{Kinesis, KinesisClient, ListStreamsInput, PutRecordsInput,
+                     PutRecordsRequestEntry};
 
 #[derive(Serialize)]
 struct FauxLog {
-    msg: &'static str
+    msg: &'static str,
 }
 
 type DefaultKinesisClient = Arc<KinesisClient<CredentialsProvider, RequestDispatcher>>;
@@ -76,7 +78,7 @@ fn main() {
     let num_puts: usize = if let Some(n) = arg_iter.next() {
         n.parse().unwrap()
     } else {
-        1000
+        10
     };
 
     let puts_size: usize = if let Some(n) = arg_iter.next() {
@@ -94,62 +96,120 @@ fn main() {
         num_threads, num_puts, puts_size, stream_name
     );
 
-    let hs: Vec<std::thread::JoinHandle<()>> = (0..num_threads)
-        .map(|_| {
-            let client = client.clone();
-            let stream_name = stream_name.clone();
-            std::thread::spawn(move || {
-//                do_thread_sync(client, stream_name, num_puts, puts_size)
-                kinesis_pipeline(client, stream_name, num_puts, puts_size)
-            })
-        })
-        .collect();
-    for h in hs {
-        h.join().unwrap();
-    }
+    kinesis_pipeline_threadpool(client, stream_name, num_puts, puts_size)
+
+//    let hs: Vec<std::thread::JoinHandle<()>> = (0..num_threads)
+//        .map(|_| {
+//            let client = client.clone();
+//            let stream_name = stream_name.clone();
+//            std::thread::spawn(move || {
+//                //                do_thread_sync(client, stream_name, num_puts, puts_size)
+//                kinesis_pipeline_threadpool(client, stream_name, num_puts, puts_size)
+//            })
+//        })
+//        .collect();
+//    for h in hs {
+//        h.join().unwrap();
+//    }
 }
 
 struct FauxData {
     serialize_data: Vec<u8>,
-    n: usize
+    n: usize,
 }
 
 impl FauxData {
     fn new() -> Self {
         FauxData {
-            serialize_data: serde_json::to_vec(&FauxLog{ msg: TEST_BUF }).unwrap(),
-            n: 0
+            serialize_data: serde_json::to_vec(&FauxLog { msg: TEST_BUF }).unwrap(),
+            n: 0,
         }
-
     }
 }
 impl Iterator for FauxData {
     type Item = PutRecordsRequestEntry;
     fn next(&mut self) -> Option<PutRecordsRequestEntry> {
         self.n += 1;
-        Some(PutRecordsRequestEntry{
+        Some(PutRecordsRequestEntry {
             data: self.serialize_data.clone(),
             explicit_hash_key: None,
-            partition_key: format!("{}", self.n)
+            partition_key: format!("{}", self.n),
         })
     }
 }
 
-fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
-    use futures::sync::mpsc::{ channel, spawn };
-    use futures::{ Sink, Future, Stream };
-    use futures::stream::Sender;
-    use rusoto_core::reactor::DEFAULT_REACTOR;
+fn kinesis_pipeline_threadpool(
+    client: DefaultKinesisClient,
+    stream_name: String,
+    puts_threads: usize,
+    puts_size: usize,
+) {
+    let (tx, mut rx) = spmc::channel();
 
-    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+    let workers : Vec<std::thread::JoinHandle<()>> = (1..puts_threads).map(|_|{
+        let rx = rx.clone();
+        let stream_name = stream_name.clone();
+        std::thread::spawn(move ||{
+            let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+            loop {
+                let recv_res = rx.recv();
+                match recv_res {
+                    Ok(batch) => {
+                        let put_res = client.put_records(&PutRecordsInput {
+                            records: batch,
+                            stream_name: stream_name.clone(),
+                        }).sync();
+                        info!("put_res: {:?}", put_res);
+                    },
+                    Err(e) => {
+                        error!("error receving: {:?}", e);
+                    }
+                }
+            }
+        })
+    }).collect();
+
     let data = FauxData::new();
 
-    let (mut tx, mut rx) = channel(1);
-
-    for rec in data {
-        tx.send(rec);
+    let mut batch = Vec::with_capacity(500);
+    for datum in data {
+        batch.push(datum);
+        if batch.len() == puts_size {
+            tx.send(batch);
+            batch = Vec::with_capacity(puts_size);
+        }
     }
 }
+
+//fn kinesis_pipeline(
+//    client: DefaultKinesisClient,
+//    stream_name: String,
+//    num_puts: usize,
+//    puts_size: usize,
+//) {
+//    use futures::sync::mpsc::{channel, spawn, unbounded};
+//    use futures::{Future, Sink, Stream};
+//    use futures::stream::Sender;
+//    use rusoto_core::reactor::DEFAULT_REACTOR;
+//
+//    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+//    let data = FauxData::new();
+//
+////    let (mut tx, mut rx) = channel(1);
+//    let (mut tx,rx) = unbounded();
+//
+//    rx.for_each(|x| {
+//        info!("got an {:?}", x);
+//        Ok(())
+//    });
+//
+//
+//
+//    for rec in data {
+//        tx = tx.unbounded_send(rec).expect("failed to send to channel");
+//        info!("zip");
+//    }
+//}
 
 //fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
 //    use futures::sync::mpsc::{ channel, spawn };
@@ -192,38 +252,54 @@ fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts:
 //    }
 //}
 
-fn do_thread_sync(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
+fn do_thread_sync(
+    client: DefaultKinesisClient,
+    stream_name: String,
+    num_puts: usize,
+    puts_size: usize,
+) {
     let client = Arc::new(KinesisClient::simple(Region::UsWest2));
     let start = Instant::now();
     let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
     match res {
         Ok(bytes) => {
-            info!("successfully sent to kinesis ({} bytes, {} seconds)", bytes, start.elapsed().as_secs());
-        },
+            info!(
+                "successfully sent to kinesis ({} bytes, {} seconds)",
+                bytes,
+                start.elapsed().as_secs()
+            );
+        }
         Err(e) => {
             error!("failed to send to kinesis: {:?}", e.description());
         }
     };
 }
 
-fn send_to_kinesis_sync(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) -> Result<usize,rusoto_kinesis::PutRecordsError> {
-    let serialize_data = serde_json::to_vec(&FauxLog{ msg: TEST_BUF })?;
-    let logs : Vec<PutRecordsRequestEntry> = (0..puts_size).map(|n|{
-        PutRecordsRequestEntry {
+fn send_to_kinesis_sync(
+    client: DefaultKinesisClient,
+    stream_name: String,
+    num_puts: usize,
+    puts_size: usize,
+) -> Result<usize, rusoto_kinesis::PutRecordsError> {
+    let serialize_data = serde_json::to_vec(&FauxLog { msg: TEST_BUF })?;
+    let logs: Vec<PutRecordsRequestEntry> = (0..puts_size)
+        .map(|n| PutRecordsRequestEntry {
             data: serialize_data.clone(),
             explicit_hash_key: None,
-            partition_key: format!("{}",n)
-        }
-    }).collect();
+            partition_key: format!("{}", n),
+        })
+        .collect();
 
     let approx_size = serialize_data.len() * num_puts;
 
     for _ in 0..num_puts {
-        client.put_records(&PutRecordsInput{
-            records: logs.clone(),
-            stream_name: stream_name.clone(),
-        }).sync()?;
-    };
+        client
+            .put_records(&PutRecordsInput {
+                records: logs.clone(),
+                stream_name: stream_name.clone(),
+            })
+            .sync()?;
+    }
 
     Ok(approx_size)
 }
