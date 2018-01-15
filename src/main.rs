@@ -148,14 +148,20 @@ fn kinesis_pipeline_threadpool(
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
 
-    let workers : Vec<std::thread::JoinHandle<()>> = (1..puts_threads).map(|_|{
+    let workers : Vec<std::thread::JoinHandle<()>> = (0..puts_threads).map(|_|{
         let rx = rx.clone();
         let stream_name = stream_name.clone();
         std::thread::spawn(move ||{
+            info!("spawning worker thread");
             let client = Arc::new(KinesisClient::simple(Region::UsWest2));
             loop {
                 let recv_res = {
-                    rx.lock().unwrap().recv()
+                    info!("acquring lock");
+                    let guard = rx.lock().unwrap();
+                    info!("receiving message");
+                    let msg = guard.recv();
+                    info!("received message");
+                    msg
                 };
                 match recv_res {
                     Ok(batch) => {
