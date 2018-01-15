@@ -144,7 +144,9 @@ fn kinesis_pipeline_threadpool(
     puts_threads: usize,
     puts_size: usize,
 ) {
-    let (tx, mut rx) = spmc::channel();
+//    let (tx, mut rx) = spmc::channel();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
 
     let workers : Vec<std::thread::JoinHandle<()>> = (1..puts_threads).map(|_|{
         let rx = rx.clone();
@@ -152,7 +154,9 @@ fn kinesis_pipeline_threadpool(
         std::thread::spawn(move ||{
             let client = Arc::new(KinesisClient::simple(Region::UsWest2));
             loop {
-                let recv_res = rx.recv();
+                let recv_res = {
+                    rx.lock().unwrap().recv()
+                };
                 match recv_res {
                     Ok(batch) => {
                         let put_res = client.put_records(&PutRecordsInput {
