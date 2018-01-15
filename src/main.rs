@@ -96,7 +96,7 @@ fn main() {
         num_threads, num_puts, puts_size, stream_name
     );
 
-    kinesis_pipeline_threadpool(client, stream_name, num_puts, puts_size)
+    kinesis_pipeline_threadpool(client, stream_name, num_threads, puts_size)
 
 //    let hs: Vec<std::thread::JoinHandle<()>> = (0..num_threads)
 //        .map(|_| {
