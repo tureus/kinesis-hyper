@@ -159,7 +159,7 @@ fn kinesis_pipeline_threadpool(
                             records: batch,
                             stream_name: stream_name.clone(),
                         }).sync();
-                        info!("put_res: {:?}", put_res);
+                        info!("put_res is ok {:?}", put_res.is_ok());
                     },
                     Err(e) => {
                         error!("error receving: {:?}", e);
