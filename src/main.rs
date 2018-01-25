@@ -96,7 +96,8 @@ fn main() {
         num_threads, num_puts, puts_size, stream_name
     );
 
-    kinesis_pipeline_threadpool(client, stream_name, num_threads, puts_size)
+//    kinesis_pipeline_threadpool(client, stream_name, num_threads, puts_size)
+    kinesis_deep_futures_pipeline(client, stream_name, num_threads, puts_size)
 
 //    let hs: Vec<std::thread::JoinHandle<()>> = (0..num_threads)
 //        .map(|_| {
@@ -126,6 +127,7 @@ impl FauxData {
         }
     }
 }
+
 impl Iterator for FauxData {
     type Item = PutRecordsRequestEntry;
     fn next(&mut self) -> Option<PutRecordsRequestEntry> {
@@ -144,7 +146,6 @@ fn kinesis_pipeline_threadpool(
     puts_threads: usize,
     puts_size: usize,
 ) {
-//    let (tx, mut rx) = spmc::channel();
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
 
@@ -156,12 +157,7 @@ fn kinesis_pipeline_threadpool(
             let client = Arc::new(KinesisClient::simple(Region::UsWest2));
             loop {
                 let recv_res = {
-                    info!("acquring lock");
-                    let guard = rx.lock().unwrap();
-                    info!("receiving message");
-                    let msg = guard.recv();
-                    info!("received message");
-                    msg
+                    rx.lock().unwrap().recv()
                 };
                 match recv_res {
                     Ok(batch) => {
@@ -190,6 +186,57 @@ fn kinesis_pipeline_threadpool(
         }
     }
 }
+
+fn kinesis_deep_futures_pipeline(
+    client: DefaultKinesisClient,
+    stream_name: String,
+    num_puts: usize,
+    puts_size: usize,
+) {
+    use futures::sync::mpsc::{channel, spawn};
+    use futures::{Future, Sink, Stream};
+    use futures::stream::Sender;
+    use rusoto_core::reactor::DEFAULT_REACTOR;
+//    use rusoto_core::future::RusotoFuture;
+
+    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
+    let data = FauxData::new();
+
+    let (mut tx,mut rx) = channel(1);
+
+    std::thread::spawn(move || {
+        let puts = rx.chunks(500).map(|batch : Vec<PutRecordsRequestEntry>| {
+            Ok(client.put_records(&PutRecordsInput {
+                records: batch,
+                stream_name: stream_name.clone(),
+            }))//.and_then(|put_res| put_res)
+        }).buffer_unordered(200);
+
+        for put_res in puts.wait() {
+            if let Ok(put) = put_res {
+                info!("hey, put got me {:?}", put.sync());
+            }
+        }
+    });
+
+    let tx = std::rc::Rc::new(std::cell::RefCell::new(tx));
+
+    for datum in data {
+        loop {
+            match tx.borrow_mut().try_send(datum.clone()) {
+                Ok(_) => break,
+                Err(e) => continue
+            }
+        }
+    }
+
+
+//    for rec in data {
+//        tx = tx.unbounded_send(rec).expect("failed to send to channel");
+//        info!("zip");
+//    }
+}
+
 
 //fn kinesis_pipeline(
 //    client: DefaultKinesisClient,
