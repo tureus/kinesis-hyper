@@ -140,53 +140,6 @@ impl Iterator for FauxData {
     }
 }
 
-fn kinesis_pipeline_threadpool(
-    client: DefaultKinesisClient,
-    stream_name: String,
-    puts_threads: usize,
-    puts_size: usize,
-) {
-    let (tx, rx) = std::sync::mpsc::sync_channel(1);
-    let rx = std::sync::Arc::new(std::sync::Mutex::new(rx));
-
-    let workers : Vec<std::thread::JoinHandle<()>> = (0..puts_threads).map(|_|{
-        let rx = rx.clone();
-        let stream_name = stream_name.clone();
-        std::thread::spawn(move ||{
-            info!("spawning worker thread");
-            let client = Arc::new(KinesisClient::simple(Region::UsWest2));
-            loop {
-                let recv_res = {
-                    rx.lock().unwrap().recv()
-                };
-                match recv_res {
-                    Ok(batch) => {
-                        let put_res = client.put_records(&PutRecordsInput {
-                            records: batch,
-                            stream_name: stream_name.clone(),
-                        }).sync();
-                        info!("put_res is ok {:?}", put_res.is_ok());
-                    },
-                    Err(e) => {
-                        error!("error receving: {:?}", e);
-                    }
-                }
-            }
-        })
-    }).collect();
-
-    let data = FauxData::new();
-
-    let mut batch = Vec::with_capacity(500);
-    for datum in data {
-        batch.push(datum);
-        if batch.len() == puts_size {
-            tx.send(batch);
-            batch = Vec::with_capacity(puts_size);
-        }
-    }
-}
-
 fn kinesis_deep_futures_pipeline(
     client: DefaultKinesisClient,
     stream_name: String,
@@ -196,16 +149,14 @@ fn kinesis_deep_futures_pipeline(
     use futures::sync::mpsc::{channel, spawn};
     use futures::{Future, Sink, Stream};
     use futures::stream::Sender;
-    use rusoto_core::reactor::DEFAULT_REACTOR;
-//    use rusoto_core::future::RusotoFuture;
 
-    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
     let data = FauxData::new();
 
-    let (mut tx,mut rx) = channel(1);
+    let (mut tx, mut rx) = channel(2000);
 
     std::thread::spawn(move || {
-        let puts = rx.chunks(500).map(|batch : Vec<PutRecordsRequestEntry>| {
+        let puts = rx.chunks(500).map(|batch: Vec<PutRecordsRequestEntry>| {
+            let client = Arc::new(KinesisClient::simple(Region::UsWest2));
             client.put_records(&PutRecordsInput {
                 records: batch,
                 stream_name: stream_name.clone(),
@@ -214,7 +165,7 @@ fn kinesis_deep_futures_pipeline(
 
         for put_res in puts.wait() {
             if let Ok(put) = put_res {
-                info!("hey, put got me {:?}", put);
+                info!("neat, I got {:?}", put);
             }
         }
     });
@@ -229,134 +180,4 @@ fn kinesis_deep_futures_pipeline(
             }
         }
     }
-
-
-//    for rec in data {
-//        tx = tx.unbounded_send(rec).expect("failed to send to channel");
-//        info!("zip");
-//    }
-}
-
-
-//fn kinesis_pipeline(
-//    client: DefaultKinesisClient,
-//    stream_name: String,
-//    num_puts: usize,
-//    puts_size: usize,
-//) {
-//    use futures::sync::mpsc::{channel, spawn, unbounded};
-//    use futures::{Future, Sink, Stream};
-//    use futures::stream::Sender;
-//    use rusoto_core::reactor::DEFAULT_REACTOR;
-//
-//    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
-//    let data = FauxData::new();
-//
-////    let (mut tx, mut rx) = channel(1);
-//    let (mut tx,rx) = unbounded();
-//
-//    rx.for_each(|x| {
-//        info!("got an {:?}", x);
-//        Ok(())
-//    });
-//
-//
-//
-//    for rec in data {
-//        tx = tx.unbounded_send(rec).expect("failed to send to channel");
-//        info!("zip");
-//    }
-//}
-
-//fn kinesis_pipeline(client: DefaultKinesisClient, stream_name: String, num_puts: usize, puts_size: usize) {
-//    use futures::sync::mpsc::{ channel, spawn };
-//    use futures::{ Sink, Future, Stream };
-//    use futures::stream::Sender;
-//    use rusoto_core::reactor::DEFAULT_REACTOR;
-//
-//    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
-//    let data = FauxData::new();
-//
-//    let (mut tx, mut rx) = channel(1);
-//    let doer = spawn(rx, &DEFAULT_REACTOR.remote, 2);
-//
-//    // Spawn thread to pull out chunks
-//    std::thread::spawn(|| {
-//        DEFAULT_REACTOR.remote.spawn(|_|{
-//            let res = doer.chunks(500).poll();
-//            info!("chunk poll: {:?}", res);
-//            Ok(())
-//        })
-//    });
-//
-//    let mut i = 0;
-//    for datum in data {
-//        let rec : Result<PutRecordsInput,io::Error>= Ok(PutRecordsInput {
-//            records: vec![datum],
-//            stream_name: stream_name.clone(),
-//        });
-//        let tx = tx.clone();
-//        DEFAULT_REACTOR.remote.spawn(|_|{
-//            let mut send  = tx.send(rec);
-//            match send.poll() {
-//                Ok(aa) => {info!("yay {:?}", aa)},
-//                Err(_) => { () },
-//            };
-//            Ok(())
-//        });
-//
-//        i+=1;
-//    }
-//}
-
-fn do_thread_sync(
-    client: DefaultKinesisClient,
-    stream_name: String,
-    num_puts: usize,
-    puts_size: usize,
-) {
-    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
-    let start = Instant::now();
-    let res = send_to_kinesis_sync(client, stream_name, num_puts, puts_size);
-    match res {
-        Ok(bytes) => {
-            info!(
-                "successfully sent to kinesis ({} bytes, {} seconds)",
-                bytes,
-                start.elapsed().as_secs()
-            );
-        }
-        Err(e) => {
-            error!("failed to send to kinesis: {:?}", e.description());
-        }
-    };
-}
-
-fn send_to_kinesis_sync(
-    client: DefaultKinesisClient,
-    stream_name: String,
-    num_puts: usize,
-    puts_size: usize,
-) -> Result<usize, rusoto_kinesis::PutRecordsError> {
-    let serialize_data = serde_json::to_vec(&FauxLog { msg: TEST_BUF })?;
-    let logs: Vec<PutRecordsRequestEntry> = (0..puts_size)
-        .map(|n| PutRecordsRequestEntry {
-            data: serialize_data.clone(),
-            explicit_hash_key: None,
-            partition_key: format!("{}", n),
-        })
-        .collect();
-
-    let approx_size = serialize_data.len() * num_puts;
-
-    for _ in 0..num_puts {
-        client
-            .put_records(&PutRecordsInput {
-                records: logs.clone(),
-                stream_name: stream_name.clone(),
-            })
-            .sync()?;
-    }
-
-    Ok(approx_size)
 }
