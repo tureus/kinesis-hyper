@@ -206,15 +206,15 @@ fn kinesis_deep_futures_pipeline(
 
     std::thread::spawn(move || {
         let puts = rx.chunks(500).map(|batch : Vec<PutRecordsRequestEntry>| {
-            Ok(client.put_records(&PutRecordsInput {
+            client.put_records(&PutRecordsInput {
                 records: batch,
                 stream_name: stream_name.clone(),
-            }))//.and_then(|put_res| put_res)
+            }).then(|put_res| Ok(put_res))
         }).buffer_unordered(200);
 
         for put_res in puts.wait() {
             if let Ok(put) = put_res {
-                info!("hey, put got me {:?}", put.sync());
+                info!("hey, put got me {:?}", put);
             }
         }
     });
