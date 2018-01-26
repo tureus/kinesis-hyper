@@ -149,8 +149,6 @@ fn kinesis_deep_futures_pipeline(
     use futures::sync::mpsc::{channel, spawn};
     use futures::{Future, Sink, Stream};
     use futures::stream::Sender;
-    use rusoto_core::reactor::DEFAULT_REACTOR;
-//    use rusoto_core::future::RusotoFuture;
 
     let data = FauxData::new();
 
