@@ -161,7 +161,7 @@ fn kinesis_deep_futures_pipeline(
                 records: batch,
                 stream_name: stream_name.clone(),
             }).then(|put_res| Ok(put_res))
-        }).buffer_unordered(200);
+        }).buffer_unordered(2);
 
         for put_res in puts.wait() {
             if let Ok(put) = put_res {
@@ -176,7 +176,10 @@ fn kinesis_deep_futures_pipeline(
         loop {
             match tx.borrow_mut().try_send(datum.clone()) {
                 Ok(_) => break,
-                Err(e) => continue
+                Err(e) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    continue
+                }
             }
         }
     }
