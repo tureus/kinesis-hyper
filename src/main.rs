@@ -152,7 +152,7 @@ fn kinesis_deep_futures_pipeline(
 
     let data = FauxData::new();
 
-    let (mut tx, mut rx) = channel(2000);
+    let (mut tx, mut rx) = channel(1);
 
     std::thread::spawn(move || {
         let puts = rx.chunks(500).map(|batch: Vec<PutRecordsRequestEntry>| {
@@ -161,7 +161,7 @@ fn kinesis_deep_futures_pipeline(
                 records: batch,
                 stream_name: stream_name.clone(),
             }).then(|put_res| Ok(put_res))
-        }).buffer_unordered(2);
+        }).buffer_unordered(1);
 
         for put_res in puts.wait() {
             if let Ok(put) = put_res {
