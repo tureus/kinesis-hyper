@@ -153,10 +153,10 @@ fn kinesis_deep_futures_pipeline(
     let data = FauxData::new();
 
     let (mut tx, mut rx) = channel(1);
+    let client = Arc::new(KinesisClient::simple(Region::UsWest2));
 
     std::thread::spawn(move || {
         let puts = rx.chunks(500).map(|batch: Vec<PutRecordsRequestEntry>| {
-            let client = Arc::new(KinesisClient::simple(Region::UsWest2));
             client.put_records(&PutRecordsInput {
                 records: batch,
                 stream_name: stream_name.clone(),
