@@ -161,7 +161,7 @@ fn kinesis_deep_futures_pipeline(
                 records: batch,
                 stream_name: stream_name.clone(),
             }).then(|put_res| Ok(put_res))
-        }).buffer_unordered(2000);
+        }).buffer_unordered(1500);
 
         for put_res in puts.wait() {
             if let Ok(put) = put_res {
