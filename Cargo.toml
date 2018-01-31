@@ -10,7 +10,10 @@ serde_json = "*"
 log = "*"
 env_logger = "*"
 pretty-bytes = "*"
-rusoto_core = {path = "/Users/xlange/code/viasat/rusoto-async/rusoto/core"}# { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
-rusoto_kinesis = {path = "/Users/xlange/code/viasat/rusoto-async/rusoto/services/kinesis"} # { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
+rusoto_core = {path = "/Users/xlange/code/viasat/rusoto/rusoto/core"}# { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
+rusoto_kinesis = {path = "/Users/xlange/code/viasat/rusoto/rusoto/services/kinesis"} # { git = "https://github.com/srijs/rusoto-async", branch = "master" } # "*"
 futures = "*"
 spmc = "*"
+
+[profile.release]
+debug=true
