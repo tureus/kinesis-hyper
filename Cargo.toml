@@ -10,6 +10,7 @@ serde_json = "*"
 log = "*"
 env_logger = "*"
 pretty-bytes = "*"
+hyper = { git = "https://github.com/hyperium/hyper", branch = "master" }
 rusoto_core = { git = "https://github.com/rusoto/rusoto", branch = "master" } # {path = "/Users/xlange/code/viasat/rusoto/rusoto/core"} # "*"
 rusoto_kinesis = { git = "https://github.com/rusoto/rusoto", branch = "master" } # {path = "/Users/xlange/code/viasat/rusoto/rusoto/services/kinesis"} # "*"
 futures = "*"
